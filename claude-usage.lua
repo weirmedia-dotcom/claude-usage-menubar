@@ -11,9 +11,14 @@ local CACHE = HOME .. "/.cache/claude-usage-menubar"
 local STATE = CACHE .. "/poll-state.json"
 local FETCH = CACHE .. "/fetch.sh"
 
-hs.menuIcon(false)  -- hide Hammerspoon's own hammer icon (delete this line to keep it)
+pcall(require, "hs.ipc")  -- enable the `hs` command-line tool (for headless diagnostics)
+hs.menuIcon(false)        -- hide Hammerspoon's own hammer icon (delete this line to keep it)
 
 local bar = hs.menubar.new()
+if not bar then
+  hs.alert.show("Claude usage: could not create a menu bar item")
+  return {}
+end
 
 -- the Claude "spark" burst as a template icon (adapts to light/dark menu bar)
 local function claudeIcon()
@@ -92,4 +97,5 @@ end
 
 refresh()
 M.timer = hs.timer.doEvery(60, refresh)  -- redraw + tick countdown every minute
+_G.CLAUDE_USAGE_LOADED = true             -- marker the doctor script checks
 return M

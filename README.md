@@ -57,6 +57,20 @@ automatically at login: **Hammerspoon → Settings → “Launch Hammerspoon at 
 | `~/.cache/claude-usage-menubar/fetch.sh` | the background poller |
 | `~/.cache/claude-usage-menubar/poll-state.json` | the tiny cache of the latest numbers |
 
+## Not showing up? Run the doctor
+
+```bash
+./doctor.sh
+```
+
+It prints a PASS/FAIL for each step (Hammerspoon installed, running, config loaded,
+token present, real % fetched) and tells you the exact fix for the first failure.
+
+The most common cause on a fresh install: **Hammerspoon was just installed and needs a
+one-time manual approval** — macOS shows a Gatekeeper "Open" prompt and a Hammerspoon
+welcome window that a script can't click. Open Hammerspoon from Applications, approve it,
+then re-run `./doctor.sh` (or `./install.sh`).
+
 ## Uninstall
 
 ```bash

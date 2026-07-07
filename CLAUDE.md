@@ -29,20 +29,30 @@ It is idempotent and:
 - runs one fetch and launches Hammerspoon.
 
 ## 2. Verify it actually shows up
-Do **not** just trust "it should be there." Verify:
+Do **not** just trust "it should be there." Run the doctor:
 
 ```bash
-# the cache should contain a real percentage
-python3 -c "import json;print(json.load(open('$HOME/.cache/claude-usage-menubar/poll-state.json')).get('last_good'))"
+./doctor.sh
 ```
 
-If `last_good` is `None`/absent:
-- Re-run `bash ~/.cache/claude-usage-menubar/fetch.sh` and check again.
-- If still empty, the keychain token is missing (user not logged into Claude Code with a
-  subscription) **or** the endpoint is briefly rate-limited (the fetcher backs off — wait
-  a few minutes). The menu bar shows a spinner ( `✳ …` ) until the first real value lands.
+It prints PASS/FAIL for every step (Hammerspoon installed / running / config loaded /
+widget loaded / token present / real % fetched) and the exact fix for the first failure.
+Act on whatever it reports. Key cases:
 
-Ask the user to confirm they see the Claude spark + % in their menu bar.
+- **"Hammerspoon not running" / "isn't responding to the CLI"** — Hammerspoon was just
+  installed and needs a **one-time manual approval**: a macOS Gatekeeper "Open" prompt and
+  a Hammerspoon welcome window that you cannot click for the user. Tell the user to open
+  Hammerspoon from Applications, approve it, then re-run `./doctor.sh`.
+- **"widget didn't load"** — check Hammerspoon's Console for a red Lua error, and confirm
+  `~/.hammerspoon/init.lua` contains `require("claude-usage")`.
+- **"no Claude Code token in keychain"** — the user isn't logged into Claude Code with a
+  Pro/Max subscription. That's required. Have them log in, then re-run.
+- **"no percentage fetched yet"** — token missing (above) or the endpoint is briefly
+  rate-limited (the fetcher backs off). Wait 2-3 minutes and re-run the doctor.
+
+Only tell the user it's done when the doctor is **all PASS**, then ask them to confirm they
+see the Claude spark + % in their menu bar (it sits to the left of the clock on the active
+display; a very full menu bar + notch can hide it — suggest removing an unused icon).
 
 ## 3. Offer auto-start
 Tell the user: to launch at login, open **Hammerspoon → Settings → "Launch Hammerspoon at

@@ -52,14 +52,27 @@ say "Fetching your current usage…"
 bash "$HOME/.cache/claude-usage-menubar/fetch.sh" || true
 
 # --- 5. launch / reload Hammerspoon ---
+FIRST_RUN=0
+pgrep -x Hammerspoon >/dev/null || FIRST_RUN=1
 say "Starting Hammerspoon…"
 osascript -e 'quit app "Hammerspoon"' 2>/dev/null || true
 sleep 1
 open -a Hammerspoon
-sleep 3
+sleep 4
+
+if [ "$FIRST_RUN" = "1" ]; then
+  warn "Hammerspoon was just launched for the first time."
+  warn "macOS may show a Gatekeeper 'Open' prompt and/or a Hammerspoon welcome window."
+  warn "You must approve/close those once — a script can't click them for you."
+fi
+
+# --- 6. verify ---
+echo ""
+say "Verifying…"
+bash "$SRC/doctor.sh" || true
 
 echo ""
-say "Done. Look for the Claude spark + % in your menu bar."
+say "If you see PASS on every line above, look for the Claude spark + % in your menu bar."
 echo ""
 warn "Requirements for the real % to show:"
 echo "   • Claude Code must be installed and logged in with a Claude Pro/Max"
