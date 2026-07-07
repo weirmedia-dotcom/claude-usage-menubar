@@ -62,7 +62,11 @@ local function refresh()
   local st  = readState()
   local g   = st.last_good or {}
   local pct = g.pct5
-  local fresh = pct ~= nil and (os.time() - (g.ts or 0)) < 1800
+  -- Keep showing the last good value while its 5-hour window is still live (the countdown
+  -- is computed live from the reset time, so it stays accurate even if a refresh is late).
+  -- Only fall back to "…" if we've never fetched, or the window has actually reset.
+  local rem = (tonumber(g.reset5_epoch) or 0) - os.time()
+  local fresh = pct ~= nil and (rem > 0 or (os.time() - (g.ts or 0)) < 1800)
 
   bar:setIcon(ICON)
   local cd = ""
