@@ -9,6 +9,10 @@ DIR="$HOME/.cache/claude-usage-menubar"
 STATE="$DIR/poll-state.json"
 LOCK="$DIR/fetch.lock"
 mkdir -p "$DIR"
+# clear a stale lock orphaned by a killed fetch (older than 2 minutes)
+if [ -d "$LOCK" ] && [ -n "$(find "$LOCK" -maxdepth 0 -mmin +2 2>/dev/null)" ]; then
+  rm -rf "$LOCK"
+fi
 # single-flight: skip if a fetch is already running
 if ! mkdir "$LOCK" 2>/dev/null; then exit 0; fi
 trap 'rmdir "$LOCK" 2>/dev/null' EXIT
