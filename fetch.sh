@@ -55,7 +55,13 @@ for ln in head.splitlines():
         try: ra = int(ln.split(":",1)[1].strip())
         except Exception: pass
 if status == 429:
-    st["next_ok"] = now + max(ra,60) + 120  # wait out the sliding-window reset + buffer
+    # ESCALATING backoff. This endpoint resets its penalty on every hit, so a fixed
+    # short retry perpetuates the rate limit forever. Back off further on each
+    # consecutive 429 (30, 60, 90 min … capped at 4h) so a clean recovery window opens.
+    fails = st.get("fails", 0) + 1
+    st["fails"] = fails
+    base = max(ra, 1800)  # never retry sooner than 30 min after a 429
+    st["next_ok"] = now + min(base * fails, 14400)
     json.dump(st, open(sp,"w")); sys.exit(0)
 try: d = json.loads(body)
 except Exception:
@@ -103,7 +109,7 @@ if isinstance(d, dict) and "error" not in d:
     if week is not None:
         g["pct7"]=pct(week); g["reset7_str"]=loc(week.get("resets_at")); g["reset7_epoch"]=ep(week.get("resets_at"))
     if g.get("pct5") is not None:
-        st["last_good"]=g; st["next_ok"]=now + 600  # steady ~10-min cadence
+        st["last_good"]=g; st["next_ok"]=now + 600; st["fails"]=0  # success: reset backoff
         json.dump(st, open(sp,"w")); sys.exit(0)
 
 st["next_ok"] = now + 300
