@@ -167,7 +167,7 @@ if isinstance(d, dict) and "error" not in d:
     if week is not None:
         g["pct7"]=pct(week); g["reset7_str"]=loc(week.get("resets_at")); g["reset7_epoch"]=ep(week.get("resets_at"))
     if g.get("pct5") is not None:
-        st["last_good"]=g; st["next_ok"]=now + 600; st["fails"]=0   # success: reset backoff
+        st["last_good"]=g; st["next_ok"]=now + 60; st["fails"]=0    # success: poll every ~1 min
         json.dump(st, open(STATE,"w")); sys.exit(0)
 
 st["next_ok"] = now + 300
