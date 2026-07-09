@@ -128,10 +128,10 @@ if isinstance(d, dict) and "error" not in d:
                 if x: return x
         return None
     def pct(o):
+        # /usage returns utilization/percent already on a 0-100 scale — never rescale it
         if not o: return None
-        if isinstance(o.get("used_percentage"),(int,float)): return round(o["used_percentage"])
-        if isinstance(o.get("utilization"),(int,float)):
-            u = o["utilization"]; return round(u*100 if u <= 1 else u)
+        for k in ("pct","percent","used_percentage","utilization"):
+            if isinstance(o.get(k),(int,float)): return round(o[k])
         return None
     def loc(v):
         if v is None: return None
@@ -149,8 +149,16 @@ if isinstance(d, dict) and "error" not in d:
             return int(datetime.fromisoformat(str(v).replace("Z","+00:00")).timestamp())
         except Exception: return None
 
-    five = find(d, ["five_hour","5h","session"])
-    week = find(d, ["seven_day","7d","week"])
+    # Prefer the canonical `limits` array (clean integer percents); fall back to the
+    # five_hour/seven_day utilization objects.
+    limits = d.get("limits") if isinstance(d.get("limits"), list) else []
+    def from_limits(kind):
+        for L in limits:
+            if isinstance(L, dict) and L.get("kind") == kind and isinstance(L.get("percent"),(int,float)):
+                return {"percent": L["percent"], "resets_at": L.get("resets_at")}
+        return None
+    five = from_limits("session")    or find(d, ["five_hour","5h","session"])
+    week = from_limits("weekly_all") or find(d, ["seven_day","7d","week"])
     g = {"ts": now}
     if five is not None:
         g["pct5"]=pct(five); g["reset5_str"]=loc(five.get("resets_at")); g["reset5_epoch"]=ep(five.get("resets_at"))
