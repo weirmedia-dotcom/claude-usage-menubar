@@ -138,7 +138,9 @@ if isinstance(d, dict) and "error" not in d:
         try:
             if isinstance(v,(int,float)): dt = datetime.fromtimestamp(v if v<1e12 else v/1000)
             else: dt = datetime.fromisoformat(str(v).replace("Z","+00:00")).astimezone()
-            return dt.strftime("%-I:%M %p")
+            today = datetime.now().astimezone().date()
+            # same day -> time only; otherwise include the weekday (e.g. "Wed 8:59 AM")
+            return dt.strftime("%-I:%M %p") if dt.date() == today else dt.strftime("%a %-I:%M %p")
         except Exception: return None
     def ep(v):
         if v is None: return None
