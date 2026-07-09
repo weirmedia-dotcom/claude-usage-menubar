@@ -55,10 +55,7 @@ end
 
 local function round(x) return math.floor(tonumber(x) + 0.5) end
 
-local function refresh()
-  -- fire the background fetcher (self-gated to ~10 min via poll-state next_ok)
-  hs.task.new("/bin/bash", function() return true end, { FETCH }):start()
-
+local function draw()
   local st  = readState()
   local g   = st.last_good or {}
   local pct = g.pct5
@@ -92,14 +89,39 @@ local function refresh()
       if g.reset7_str then menu[#menu+1] = { title = "    resets " .. g.reset7_str } end
     end
   else
-    menu[#menu+1] = { title = "Fetching real % …" }
+    menu[#menu+1] = { title = M.refreshing and "Refreshing …" or "Fetching real % …" }
   end
   menu[#menu+1] = { title = "-" }
-  menu[#menu+1] = { title = "Refresh now", fn = refresh }
+  menu[#menu+1] = {
+    title = M.refreshing and "Refreshing …" or "Refresh now",
+    fn = M.refreshing and function() end or M.forceRefresh,
+    disabled = M.refreshing and true or false,
+  }
   bar:setMenu(menu)
 end
 
+-- periodic tick: redraws every minute (countdown) and fires a normal, backoff-respecting
+-- fetch in the background (a no-op if we already fetched recently)
+local function refresh()
+  hs.task.new("/bin/bash", function() return true end, { FETCH }):start()
+  draw()
+end
+
+-- manual "Refresh now": bypasses the backoff, waits for the fetch to actually finish,
+-- then redraws with the fresh data. This is the fix for the button silently no-op'ing
+-- when clicked inside the normal ~10-min polling window.
+function M.forceRefresh()
+  if M.refreshing then return end
+  M.refreshing = true
+  draw()  -- show "Refreshing …" immediately
+  hs.task.new("/bin/bash", function()
+    M.refreshing = false
+    draw()
+  end, { FETCH, "--force" }):start()
+end
+
+draw()
 refresh()
-M.timer = hs.timer.doEvery(60, refresh)  -- redraw + tick countdown every minute
+M.timer = hs.timer.doEvery(60, refresh)  -- redraw + tick countdown, and opportunistically fetch
 _G.CLAUDE_USAGE_LOADED = true             -- marker the doctor script checks
 return M

@@ -14,7 +14,7 @@ if [ -d "$LOCK" ] && [ -n "$(find "$LOCK" -maxdepth 0 -mmin +2 2>/dev/null)" ]; 
 if ! mkdir "$LOCK" 2>/dev/null; then exit 0; fi
 trap 'rmdir "$LOCK" 2>/dev/null' EXIT
 
-python3 - "$STATE" <<'PY'
+python3 - "$STATE" "$1" <<'PY'
 import json, sys, time, subprocess
 from datetime import datetime
 
@@ -24,10 +24,12 @@ CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"     # Claude Code public OAut
 TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 
+FORCE = len(sys.argv) > 2 and sys.argv[2] == "--force"
+
 try: st = json.load(open(STATE))
 except Exception: st = {}
 now = time.time()
-if now < st.get("next_ok", 0):
+if not FORCE and now < st.get("next_ok", 0):
     sys.exit(0)  # backing off; keep serving last good value
 
 # ---------- keychain + token refresh ----------
