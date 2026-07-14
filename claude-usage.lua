@@ -10,6 +10,8 @@ local HOME  = os.getenv("HOME")
 local CACHE = HOME .. "/.cache/claude-usage-menubar"
 local STATE = CACHE .. "/poll-state.json"
 local FETCH = CACHE .. "/fetch.sh"
+local COST_STATE = CACHE .. "/cost-state.json"
+local COST_SCAN = CACHE .. "/cost-scan.sh"
 
 pcall(require, "hs.ipc")  -- enable the `hs` command-line tool (for headless diagnostics)
 hs.menuIcon(false)        -- hide Hammerspoon's own hammer icon (delete this line to keep it)
@@ -55,6 +57,20 @@ end
 
 local function round(x) return math.floor(tonumber(x) + 0.5) end
 
+local function readCost()
+  local ok, t = pcall(function() return hs.json.read(COST_STATE) end)
+  if ok and type(t) == "table" then return t end
+  return nil
+end
+
+local function fmtTokens(n)
+  n = tonumber(n) or 0
+  if n >= 1e9 then return string.format("%.1fB", n / 1e9) end
+  if n >= 1e6 then return string.format("%.0fM", n / 1e6) end
+  if n >= 1e3 then return string.format("%.0fk", n / 1e3) end
+  return tostring(n)
+end
+
 local function draw()
   local st  = readState()
   local g   = st.last_good or {}
@@ -99,7 +115,23 @@ local function draw()
         end
       end
     end
-  else
+  end
+
+  -- rolling 7-day token usage priced at API rates (from cost-scan.sh)
+  local cost = readCost()
+  if cost and type(cost.models) == "table" and #cost.models > 0 then
+    menu[#menu+1] = { title = "-" }
+    menu[#menu+1] = { title = string.format("Last 7 days · API value $%.2f", cost.total_usd or 0) }
+    for _, m in ipairs(cost.models) do
+      local price = m.usd and string.format("$%.2f", m.usd) or "?"
+      menu[#menu+1] = {
+        title = string.format("    %s  %s · %s tok", m.label or "?", price, fmtTokens(m.total_tokens)),
+      }
+    end
+  end
+
+  if not fresh then
+    if #menu > 0 then menu[#menu+1] = { title = "-" } end
     menu[#menu+1] = { title = M.refreshing and "Refreshing …" or "Fetching real % …" }
   end
   menu[#menu+1] = { title = "-" }
@@ -131,8 +163,14 @@ function M.forceRefresh()
   end, { FETCH, "--force" }):start()
 end
 
+local function costScan()
+  hs.task.new("/bin/bash", function() draw() end, { COST_SCAN }):start()
+end
+
 draw()
 refresh()
+costScan()
 M.timer = hs.timer.doEvery(60, refresh)  -- redraw + tick countdown, and opportunistically fetch
+M.costTimer = hs.timer.doEvery(900, costScan)  -- 7-day cost rescan every 15 min (incremental)
 _G.CLAUDE_USAGE_LOADED = true             -- marker the doctor script checks
 return M

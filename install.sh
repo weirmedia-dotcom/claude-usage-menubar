@@ -30,6 +30,8 @@ say "Installing the usage fetcher…"
 mkdir -p "$HOME/.cache/claude-usage-menubar"
 cp "$SRC/fetch.sh" "$HOME/.cache/claude-usage-menubar/fetch.sh"
 chmod +x "$HOME/.cache/claude-usage-menubar/fetch.sh"
+cp "$SRC/cost-scan.sh" "$HOME/.cache/claude-usage-menubar/cost-scan.sh"
+chmod +x "$HOME/.cache/claude-usage-menubar/cost-scan.sh"
 
 # --- 3. Hammerspoon module ---
 say "Installing the Hammerspoon module…"
