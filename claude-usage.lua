@@ -117,16 +117,27 @@ local function draw()
     end
   end
 
-  -- rolling 7-day token usage priced at API rates (from cost-scan.sh)
+  -- rolling token usage priced at API rates + senior-dev labor equivalent
+  -- (from cost-scan.sh; 7-day and 30-day windows)
   local cost = readCost()
-  if cost and type(cost.models) == "table" and #cost.models > 0 then
-    menu[#menu+1] = { title = "-" }
-    menu[#menu+1] = { title = string.format("Last 7 days · API value $%.2f", cost.total_usd or 0) }
-    for _, m in ipairs(cost.models) do
-      local price = m.usd and string.format("$%.2f", m.usd) or "?"
-      menu[#menu+1] = {
-        title = string.format("    %s  %s · %s tok", m.label or "?", price, fmtTokens(m.total_tokens)),
-      }
+  if cost and type(cost.windows) == "table" then
+    for _, w in ipairs(cost.windows) do
+      if type(w.models) == "table" and #w.models > 0 then
+        menu[#menu+1] = { title = "-" }
+        menu[#menu+1] = { title = string.format("Last %d days · API value $%.0f", w.window_days or 0, w.total_usd or 0) }
+        for _, m in ipairs(w.models) do
+          local price = m.usd and string.format("$%.2f", m.usd) or "?"
+          menu[#menu+1] = {
+            title = string.format("    %s  %s · %s tok", m.label or "?", price, fmtTokens(m.total_tokens)),
+          }
+        end
+        if w.dev_hours and w.dev_usd then
+          menu[#menu+1] = {
+            title = string.format("    ≈ %.0f dev-hours · $%s at $%d/hr",
+              w.dev_hours, tostring(w.dev_usd), w.dev_rate or 100),
+          }
+        end
+      end
     end
   end
 

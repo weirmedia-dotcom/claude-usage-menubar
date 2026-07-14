@@ -26,8 +26,11 @@ CACHE = os.path.join(DIR, "cost-cache.json")
 STATE = os.path.join(DIR, "cost-state.json")
 ROOT = os.path.expanduser("~/.claude/projects")
 
-WINDOW = 7 * 86400          # aggregate window
-SCAN_WINDOW = 8 * 86400     # keep an extra day of entries cached
+CACHE_VERSION = 2           # bump when extraction shape/window changes (forces re-extract)
+WINDOWS = [7, 30]           # aggregate windows, days
+SCAN_WINDOW = 31 * 86400    # keep an extra day of entries cached
+SENIOR_RATE = 100           # USD/hr, senior-dev labor equivalent
+BUCKET = 600                # 10-min activity buckets for dev-hour estimate
 now = time.time()
 
 # ---- pricing: (input, output) USD per MTok; matched by first substring hit.
@@ -105,6 +108,8 @@ def extract(path):
 # ---- incremental file cache
 try:
     cache = json.load(open(CACHE))
+    if cache.get("v") != CACHE_VERSION:
+        cache = {"files": {}}
 except Exception:
     cache = {"files": {}}
 files = cache.get("files", {})
@@ -128,42 +133,50 @@ for dirpath, _dirs, names in os.walk(ROOT):
         else:
             live[p] = {"key": key, "entries": extract(p)}
 
-json.dump({"files": live}, open(CACHE, "w"))
+json.dump({"v": CACHE_VERSION, "files": live}, open(CACHE, "w"))
 
-# ---- aggregate: global dedup, 7-day filter, group by model label
-seen = set()
-agg = {}
-cutoff = now - WINDOW
-for rec in live.values():
-    for h, ts, model, tin, tout, cw5, cw1, cr in rec["entries"]:
-        if ts < cutoff or h in seen:
-            continue
-        seen.add(h)
-        a = agg.setdefault(label(model), {"model": model, "in": 0, "out": 0,
-                                          "cw5": 0, "cw1": 0, "cr": 0})
-        a["in"] += tin; a["out"] += tout
-        a["cw5"] += cw5; a["cw1"] += cw1; a["cr"] += cr
+# ---- aggregate per window: global dedup, group by model label, plus a
+# senior-dev labor equivalent (distinct (session, 10-min bucket) slots of
+# assistant activity — parallel sessions count separately, since a human
+# would have to do that work serially — priced at SENIOR_RATE/hr).
+def aggregate(days):
+    cutoff = now - days * 86400
+    seen, agg, slots = set(), {}, set()
+    for path, rec in live.items():
+        for h, ts, model, tin, tout, cw5, cw1, cr in rec["entries"]:
+            if ts < cutoff or h in seen:
+                continue
+            seen.add(h)
+            slots.add((path, int(ts) // BUCKET))
+            a = agg.setdefault(label(model), {"model": model, "in": 0, "out": 0,
+                                              "cw5": 0, "cw1": 0, "cr": 0})
+            a["in"] += tin; a["out"] += tout
+            a["cw5"] += cw5; a["cw1"] += cw1; a["cr"] += cr
 
-models = []
-total = 0.0
-for name, a in agg.items():
-    r = rates(a["model"])
-    cost = None
-    if r:
-        rin, rout = r
-        cost = (a["in"] * rin + a["out"] * rout
-                + a["cw5"] * rin * 1.25 + a["cw1"] * rin * 2.0
-                + a["cr"] * rin * 0.1) / 1e6
-        total += cost
-    models.append({
-        "label": name,
-        "input": a["in"], "output": a["out"],
-        "cache_write": a["cw5"] + a["cw1"], "cache_read": a["cr"],
-        "total_tokens": a["in"] + a["out"] + a["cw5"] + a["cw1"] + a["cr"],
-        "usd": round(cost, 2) if cost is not None else None,
-    })
-models.sort(key=lambda m: -(m["usd"] or 0))
+    models, total = [], 0.0
+    for name, a in agg.items():
+        r = rates(a["model"])
+        cost = None
+        if r:
+            rin, rout = r
+            cost = (a["in"] * rin + a["out"] * rout
+                    + a["cw5"] * rin * 1.25 + a["cw1"] * rin * 2.0
+                    + a["cr"] * rin * 0.1) / 1e6
+            total += cost
+        models.append({
+            "label": name,
+            "input": a["in"], "output": a["out"],
+            "cache_write": a["cw5"] + a["cw1"], "cache_read": a["cr"],
+            "total_tokens": a["in"] + a["out"] + a["cw5"] + a["cw1"] + a["cr"],
+            "usd": round(cost, 2) if cost is not None else None,
+        })
+    models.sort(key=lambda m: -(m["usd"] or 0))
+    dev_hours = len(slots) * BUCKET / 3600.0
+    return {"window_days": days, "total_usd": round(total, 2), "models": models,
+            "dev_hours": round(dev_hours, 1),
+            "dev_usd": round(dev_hours * SENIOR_RATE),
+            "dev_rate": SENIOR_RATE}
 
-json.dump({"ts": now, "window_days": 7, "total_usd": round(total, 2),
-           "models": models}, open(STATE, "w"))
+json.dump({"ts": now, "windows": [aggregate(d) for d in WINDOWS]},
+          open(STATE, "w"))
 PY
