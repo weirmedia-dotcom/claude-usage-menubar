@@ -161,7 +161,18 @@ if isinstance(d, dict) and "error" not in d:
         return None
     five = from_limits("session")    or find(d, ["five_hour","5h","session"])
     week = from_limits("weekly_all") or find(d, ["seven_day","7d","week"])
+    # model-scoped weekly limits (e.g. Fable/Opus caps) ride in as weekly_scoped entries
+    scoped = []
+    for L in limits:
+        if isinstance(L, dict) and L.get("kind") == "weekly_scoped" and isinstance(L.get("percent"),(int,float)):
+            sc = L.get("scope") if isinstance(L.get("scope"), dict) else {}
+            model = sc.get("model") if isinstance(sc.get("model"), dict) else {}
+            scoped.append({"label": model.get("display_name") or "Model",
+                           "pct": round(L["percent"]),
+                           "reset_str": loc(L.get("resets_at")),
+                           "reset_epoch": ep(L.get("resets_at"))})
     g = {"ts": now}
+    if scoped: g["scoped"] = scoped
     if five is not None:
         g["pct5"]=pct(five); g["reset5_str"]=loc(five.get("resets_at")); g["reset5_epoch"]=ep(five.get("resets_at"))
     if week is not None:

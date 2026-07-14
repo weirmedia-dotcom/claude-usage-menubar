@@ -88,6 +88,17 @@ local function draw()
       menu[#menu+1] = { title = "    " .. round(g.pct7) .. "% used" }
       if g.reset7_str then menu[#menu+1] = { title = "    resets " .. g.reset7_str } end
     end
+    -- model-scoped weekly limits (Fable, Opus, ...) reported by the usage endpoint
+    if type(g.scoped) == "table" then
+      for _, s in ipairs(g.scoped) do
+        if s.pct ~= nil then
+          menu[#menu+1] = { title = "-" }
+          menu[#menu+1] = { title = (s.label or "Model") .. " weekly limit" }
+          menu[#menu+1] = { title = "    " .. round(s.pct) .. "% used" }
+          if s.reset_str then menu[#menu+1] = { title = "    resets " .. s.reset_str } end
+        end
+      end
+    end
   else
     menu[#menu+1] = { title = M.refreshing and "Refreshing …" or "Fetching real % …" }
   end
