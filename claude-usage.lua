@@ -124,7 +124,7 @@ local function draw()
     for _, w in ipairs(cost.windows) do
       if type(w.models) == "table" and #w.models > 0 then
         menu[#menu+1] = { title = "-" }
-        menu[#menu+1] = { title = string.format("Last %d days · API value $%.0f", w.window_days or 0, w.total_usd or 0) }
+        menu[#menu+1] = { title = string.format("%s · API value $%.0f", w.label or "Window", w.total_usd or 0) }
         for _, m in ipairs(w.models) do
           local price = m.usd and string.format("$%.2f", m.usd) or "?"
           menu[#menu+1] = {

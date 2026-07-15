@@ -139,8 +139,7 @@ json.dump({"v": CACHE_VERSION, "files": live}, open(CACHE, "w"))
 # senior-dev labor equivalent (distinct (session, 10-min bucket) slots of
 # assistant activity — parallel sessions count separately, since a human
 # would have to do that work serially — priced at SENIOR_RATE/hr).
-def aggregate(days):
-    cutoff = now - days * 86400
+def aggregate(label_text, cutoff):
     seen, agg, slots = set(), {}, set()
     for path, rec in live.items():
         for h, ts, model, tin, tout, cw5, cw1, cr in rec["entries"]:
@@ -172,11 +171,14 @@ def aggregate(days):
         })
     models.sort(key=lambda m: -(m["usd"] or 0))
     dev_hours = len(slots) * BUCKET / 3600.0
-    return {"window_days": days, "total_usd": round(total, 2), "models": models,
+    return {"label": label_text, "total_usd": round(total, 2), "models": models,
             "dev_hours": round(dev_hours, 1),
             "dev_usd": round(dev_hours * SENIOR_RATE),
             "dev_rate": SENIOR_RATE}
 
-json.dump({"ts": now, "windows": [aggregate(d) for d in WINDOWS]},
-          open(STATE, "w"))
+midnight = datetime.now().astimezone().replace(hour=0, minute=0, second=0,
+                                               microsecond=0).timestamp()
+windows = [aggregate("Today", midnight)]
+windows += [aggregate(f"Last {d} days", now - d * 86400) for d in WINDOWS]
+json.dump({"ts": now, "windows": windows}, open(STATE, "w"))
 PY
