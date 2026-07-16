@@ -124,17 +124,18 @@ local function draw()
     for _, w in ipairs(cost.windows) do
       if type(w.models) == "table" and #w.models > 0 then
         menu[#menu+1] = { title = "-" }
-        menu[#menu+1] = { title = string.format("%s · API value $%.0f", w.label or "Window", w.total_usd or 0) }
+        menu[#menu+1] = { title = string.format("%s · API value CA$%.0f", w.label or "Window", w.total_cad or w.total_usd or 0) }
         for _, m in ipairs(w.models) do
-          local price = m.usd and string.format("$%.2f", m.usd) or "?"
+          local v = m.cad or m.usd
+          local price = v and string.format("CA$%.2f", v) or "?"
           menu[#menu+1] = {
             title = string.format("    %s  %s · %s tok", m.label or "?", price, fmtTokens(m.total_tokens)),
           }
         end
-        if w.dev_hours and w.dev_usd then
+        if w.dev_hours and w.dev_cad then
           menu[#menu+1] = {
-            title = string.format("    ≈ %.0f dev-hours · $%s at $%d/hr",
-              w.dev_hours, tostring(w.dev_usd), w.dev_rate or 100),
+            title = string.format("    ≈ %.0f contract dev-hours · CA$%s at CA$%d/hr",
+              w.dev_hours, tostring(w.dev_cad), w.dev_rate or 140),
           }
         end
       end

@@ -29,9 +29,27 @@ ROOT = os.path.expanduser("~/.claude/projects")
 CACHE_VERSION = 2           # bump when extraction shape/window changes (forces re-extract)
 WINDOWS = [7, 30]           # aggregate windows, days
 SCAN_WINDOW = 31 * 86400    # keep an extra day of entries cached
-SENIOR_RATE = 100           # USD/hr, senior-dev labor equivalent
+SENIOR_RATE = 140           # CAD/hr, senior CONTRACT developer equivalent
 BUCKET = 600                # 10-min activity buckets for dev-hour estimate
+FX_FALLBACK = 1.37          # USD->CAD if the Bank of Canada fetch fails
 now = time.time()
+
+def usd_cad():
+    """Live USD->CAD from the Bank of Canada Valet API; falls back gracefully."""
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["curl", "-s", "--max-time", "8",
+             "https://www.bankofcanada.ca/valet/observations/FXUSDCAD/json?recent=1"],
+            capture_output=True, text=True, timeout=10).stdout
+        v = float(json.loads(out)["observations"][-1]["FXUSDCAD"]["v"])
+        if 1.0 < v < 2.5:
+            return v
+    except Exception:
+        pass
+    return FX_FALLBACK
+
+FX = usd_cad()
 
 # ---- pricing: (input, output) USD per MTok; matched by first substring hit.
 # Cache multipliers per Anthropic pricing: write 5m TTL = 1.25x input,
@@ -168,17 +186,22 @@ def aggregate(label_text, cutoff):
             "cache_write": a["cw5"] + a["cw1"], "cache_read": a["cr"],
             "total_tokens": a["in"] + a["out"] + a["cw5"] + a["cw1"] + a["cr"],
             "usd": round(cost, 2) if cost is not None else None,
+            "cad": round(cost * FX, 2) if cost is not None else None,
         })
     models.sort(key=lambda m: -(m["usd"] or 0))
     dev_hours = len(slots) * BUCKET / 3600.0
-    return {"label": label_text, "total_usd": round(total, 2), "models": models,
+    return {"label": label_text,
+            "total_usd": round(total, 2),
+            "total_cad": round(total * FX, 2),
+            "models": models,
             "dev_hours": round(dev_hours, 1),
-            "dev_usd": round(dev_hours * SENIOR_RATE),
+            "dev_cad": round(dev_hours * SENIOR_RATE),
             "dev_rate": SENIOR_RATE}
 
 midnight = datetime.now().astimezone().replace(hour=0, minute=0, second=0,
                                                microsecond=0).timestamp()
 windows = [aggregate("Today", midnight)]
 windows += [aggregate(f"Last {d} days", now - d * 86400) for d in WINDOWS]
-json.dump({"ts": now, "windows": windows}, open(STATE, "w"))
+json.dump({"ts": now, "fx_usd_cad": round(FX, 4), "windows": windows},
+          open(STATE, "w"))
 PY
