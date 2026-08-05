@@ -50,16 +50,32 @@ else fail "no Claude Code token in keychain"
   note "Log into Claude Code with a Claude Pro/Max subscription, then re-run ./install.sh."
   note "(Without it the widget can show but the % will stay blank.)"; fi
 
-# 7. do we have a real percentage cached?
-bash "$DIR/fetch.sh" 2>/dev/null
-LG=$(python3 -c "import json;print(json.load(open('$DIR/poll-state.json')).get('last_good') is not None)" 2>/dev/null)
-if [ "$LG" = "True" ]; then
-  P=$(python3 -c "import json;print(json.load(open('$DIR/poll-state.json'))['last_good'].get('pct5'))" 2>/dev/null)
-  pass "real usage fetched (5-hour window: ${P}% used)"
+# 7. do we have a real, FRESH percentage cached? (not just "did we ever fetch one")
+bash "$DIR/fetch.sh" --force 2>/dev/null
+AUTH_ERR=$(python3 -c "import json;print(json.load(open('$DIR/poll-state.json')).get('auth_error') is True)" 2>/dev/null)
+if [ "$AUTH_ERR" = "True" ]; then
+  fail "Claude Code is logged out (token invalid/expired/empty)"
+  note "Run: claude auth login    — then re-run this doctor."
 else
-  fail "no percentage fetched yet"
-  note "Either the keychain token is missing (see above), or the endpoint is briefly"
-  note "rate-limited (the fetcher backs off). Wait 2-3 min and re-run this doctor."
+  LG=$(python3 -c "import json;print(json.load(open('$DIR/poll-state.json')).get('last_good') is not None)" 2>/dev/null)
+  if [ "$LG" = "True" ]; then
+    read -r P AGE <<<"$(python3 -c "
+import json, time
+d = json.load(open('$DIR/poll-state.json'))['last_good']
+print(d.get('pct5'), int(time.time() - d.get('ts', 0)))
+" 2>/dev/null)"
+    if [ -n "$AGE" ] && [ "$AGE" -gt 600 ]; then
+      fail "cached usage is stale (last real fetch was ${AGE}s ago, ${P}% used)"
+      note "A forced fetch just ran above and didn't refresh it — check for network issues"
+      note "or run: claude auth login"
+    else
+      pass "real usage fetched (5-hour window: ${P}% used, ${AGE}s old)"
+    fi
+  else
+    fail "no percentage fetched yet"
+    note "Either the keychain token is missing (see above), or the endpoint is briefly"
+    note "rate-limited (the fetcher backs off). Wait 2-3 min and re-run this doctor."
+  fi
 fi
 
 echo "---------------------------------"

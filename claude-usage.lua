@@ -71,15 +71,52 @@ local function fmtTokens(n)
   return tostring(n)
 end
 
+-- One-shot macOS notifications so a dead widget doesn't rely on Mark noticing a
+-- blank menu bar item. Debounced in-memory: fires once per state transition, not
+-- every 60s tick, and clears itself once things recover.
+local function notifyOnce(key, title, text)
+  if M["_notified_" .. key] then return end
+  M["_notified_" .. key] = true
+  hs.notify.new({ title = title, informativeText = text }):send()
+end
+local function clearNotify(key) M["_notified_" .. key] = nil end
+
 local function draw()
   local st  = readState()
   local g   = st.last_good or {}
   local pct = g.pct5
+
+  if st.auth_error == true then
+    clearNotify("stale")
+    bar:setIcon(ICON)
+    bar:setTitle(" ⚠︎ login")
+    notifyOnce("auth", "Claude usage widget",
+      "Claude Code is logged out, so usage % can't be fetched. Run `claude auth login` in a terminal.")
+    bar:setMenu({
+      { title = "Claude Code is logged out" },
+      { title = "    run: claude auth login" },
+      { title = "-" },
+      {
+        title = M.refreshing and "Refreshing …" or "Refresh now",
+        fn = M.refreshing and function() end or M.forceRefresh,
+        disabled = M.refreshing and true or false,
+      },
+    })
+    return
+  end
+  clearNotify("auth")
+
   -- Keep showing the last good value while its 5-hour window is still live (the countdown
   -- is computed live from the reset time, so it stays accurate even if a refresh is late).
   -- Only fall back to "…" if we've never fetched, or the window has actually reset.
   local rem = (tonumber(g.reset5_epoch) or 0) - os.time()
   local fresh = pct ~= nil and (rem > 0 or (os.time() - (g.ts or 0)) < 1800)
+
+  if fresh then clearNotify("stale")
+  else
+    notifyOnce("stale", "Claude usage widget",
+      "Usage % hasn't refreshed in a while — check Hammerspoon, or run `claude auth login` if it turns out to be a login problem.")
+  end
 
   bar:setIcon(ICON)
   local cd = ""

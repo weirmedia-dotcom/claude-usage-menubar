@@ -71,6 +71,7 @@ def refresh(cred):
 try:
     cred = kc_read()
 except Exception:
+    st["auth_error"] = True
     st["next_ok"] = now + 900; json.dump(st, open(STATE,"w")); sys.exit(0)   # not logged in
 
 o = cred.get("claudeAiOauth", {})
@@ -78,6 +79,13 @@ tok = o.get("accessToken")
 # proactively refresh if expired (or within 60s of expiry)
 if (o.get("expiresAt", 0) / 1000) < now + 60:
     tok = refresh(cred) or tok
+
+if not tok:
+    # no usable token and refresh couldn't produce one -> genuinely logged out
+    # (claude auth login), not a transient rate limit. Don't hammer the API for this.
+    st["auth_error"] = True
+    st["next_ok"] = now + 900
+    json.dump(st, open(STATE,"w")); sys.exit(0)
 
 # ---------- fetch usage (with one refresh-and-retry on 401) ----------
 def call_usage(access):
@@ -104,6 +112,12 @@ try:
         if tok2: status, ra, body = call_usage(tok2)
 except Exception:
     st["next_ok"] = now + 300; json.dump(st, open(STATE,"w")); sys.exit(0)
+
+if status == 401:
+    # token was rejected and the refresh-and-retry above didn't fix it -> logged out
+    st["auth_error"] = True
+    st["next_ok"] = now + 900
+    json.dump(st, open(STATE,"w")); sys.exit(0)
 
 if status == 429:
     fails = st.get("fails", 0) + 1
@@ -179,6 +193,7 @@ if isinstance(d, dict) and "error" not in d:
         g["pct7"]=pct(week); g["reset7_str"]=loc(week.get("resets_at")); g["reset7_epoch"]=ep(week.get("resets_at"))
     if g.get("pct5") is not None:
         st["last_good"]=g; st["next_ok"]=now + 60; st["fails"]=0    # success: poll every ~1 min
+        st["auth_error"] = False
         json.dump(st, open(STATE,"w")); sys.exit(0)
 
 st["next_ok"] = now + 300
