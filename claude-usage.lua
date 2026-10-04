@@ -91,10 +91,14 @@ local function draw()
     bar:setIcon(ICON)
     bar:setTitle(" ⚠︎ login")
     notifyOnce("auth", "Claude usage widget",
-      "Claude Code is logged out, so usage % can't be fetched. Run `claude auth login` in a terminal.")
+      "Claude Code is logged out, so usage % can't be fetched. Click the menu bar item → Log in to Claude Code.")
     bar:setMenu({
       { title = "Claude Code is logged out" },
-      { title = "    run: claude auth login" },
+      {
+        title = M.loginPolling and "Waiting for login …" or "Log in to Claude Code …",
+        fn = M.loginPolling and function() end or M.login,
+        disabled = M.loginPolling and true or false,
+      },
       { title = "-" },
       {
         title = M.refreshing and "Refreshing …" or "Refresh now",
@@ -210,6 +214,38 @@ function M.forceRefresh()
     M.refreshing = false
     draw()
   end, { FETCH, "--force" }):start()
+end
+
+-- "Log in to Claude Code …": the logged-out menu used to show `claude auth login` as a
+-- plain label, so the only clickable item was Refresh, which re-used the same dead token.
+-- This opens Terminal running the real login, then force-fetches every 10s (for up to
+-- 5 min) until the fetch stops reporting auth_error, so the % comes back on its own.
+function M.login()
+  if M.loginPolling then return end
+  local ok = hs.osascript.applescript([[
+    tell application "Terminal"
+      activate
+      do script "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\" claude auth login"
+    end tell
+  ]])
+  if not ok then
+    hs.alert.show("Couldn't open Terminal. Run `claude auth login` yourself.")
+    return
+  end
+  M.loginPolling = true
+  draw()
+  local tries = 0
+  if M.loginTimer then M.loginTimer:stop() end
+  M.loginTimer = hs.timer.doEvery(10, function()
+    tries = tries + 1
+    if readState().auth_error ~= true or tries > 30 then
+      M.loginTimer:stop(); M.loginTimer = nil
+      M.loginPolling = false
+      draw()
+      return
+    end
+    hs.task.new("/bin/bash", function() draw() end, { FETCH, "--force" }):start()
+  end)
 end
 
 local function costScan()
