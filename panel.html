@@ -77,6 +77,9 @@
   .spark i { flex: 1; min-height: 2px; border-radius: 2px 2px 0 0; background: var(--accent); opacity: .55; }
   .spark i.today { opacity: 1; }
 
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 10px 0 2px; }
+  .stats > div + div { border-left: 1px solid var(--line); padding-left: 10px; }
+  .stats .muted { font-size: 10.5px; margin-top: 1px; }
   .tabs { display: flex; gap: 2px; background: var(--track); border-radius: 7px; padding: 2px; }
   .tabs button { flex: 1; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 11px;
                  padding: 3px 0; border-radius: 5px; }
@@ -106,6 +109,7 @@ let D = null;
 
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const money = (v, d = 2) => "$" + Number(v || 0).toFixed(d);
+const fmtK = v => Math.round(Number(v || 0)).toLocaleString("en-CA");
 const sev = p => p >= 90 ? "var(--bad)" : p >= 75 ? "var(--warn)" : "var(--accent)";
 function left(epoch) {
   const s = epoch - Date.now() / 1000;
@@ -220,10 +224,14 @@ function costCard(d) {
   const fmtTok = n => n >= 1e9 ? (n / 1e9).toFixed(1) + "B" : n >= 1e6 ? (n / 1e6).toFixed(0) + "M" : n >= 1e3 ? (n / 1e3).toFixed(0) + "k" : n;
   const tabs = ws.map((x, i) => `<button class="${i === tab ? "on" : ""}" onclick="pickTab(${i})">${esc(x.label.replace("Last ", ""))}</button>`).join("");
   return `<div class="card">
-    <div class="h"><b>API value of your usage</b><span>if billed per token</span></div>
+    <div class="h"><b>Value of your usage</b></div>
     <div class="tabs">${tabs}</div>
-    <div class="row" style="margin-top:8px"><span class="big num">CA$${Math.round(w.total_cad ?? w.total_usd ?? 0)}</span>
-      ${w.dev_hours ? `<span class="muted num" style="align-self:flex-end">≈ ${Math.round(w.dev_hours)} dev-hours</span>` : ""}</div>
+    <div class="stats">
+      <div><div class="big num">CA$${fmtK(w.total_cad ?? w.total_usd ?? 0)}</div>
+        <div class="muted">API, billed per token</div></div>
+      ${w.dev_cad ? `<div><div class="big num">CA$${fmtK(w.dev_cad)}</div>
+        <div class="muted num" style="white-space:nowrap">Dev, ${Math.round(w.dev_hours)} h @ $${w.dev_rate || 140}/h</div></div>` : ""}
+    </div>
     ${models.map(m => `<div class="model"><span>${esc(m.label)}</span>
         <span class="mbar"><i style="width:${((m.cad || 0) / max * 100).toFixed(1)}%"></i></span>
         <span class="v num">CA$${(m.cad || 0).toFixed(2)} <span class="muted">${fmtTok(m.total_tokens || 0)}</span></span></div>`).join("")}
