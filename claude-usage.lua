@@ -1,5 +1,6 @@
 -- Claude usage in the macOS menu bar (Hammerspoon module)
--- Shows the Claude "spark" + current 5-hour window %, plus a countdown to reset.
+-- Shows the Claude "spark" + current 5-hour window % (weekly % on plans without a
+-- 5-hour window, e.g. Ultra), plus a countdown to reset.
 -- Click for a dropdown with the 5-hour and weekly limits and their reset times.
 --
 -- Loaded from ~/.hammerspoon/init.lua via:  require("claude-usage")
@@ -110,11 +111,19 @@ local function draw()
   end
   clearNotify("auth")
 
-  -- Keep showing the last good value while its 5-hour window is still live (the countdown
+  -- Ultra (ex Max 20x, Oct 2026) has no 5-hour window, only the weekly limit. Headline
+  -- whichever window the plan actually has: 5-hour if present, else weekly.
+  local weeklyOnly = pct == nil and g.pct7 ~= nil
+  local headReset = g.reset5_epoch
+  if weeklyOnly then pct, headReset = g.pct7, g.reset7_epoch end
+
+  -- Keep showing the last good value while its window is still live (the countdown
   -- is computed live from the reset time, so it stays accurate even if a refresh is late).
   -- Only fall back to "…" if we've never fetched, or the window has actually reset.
-  local rem = (tonumber(g.reset5_epoch) or 0) - os.time()
-  local fresh = pct ~= nil and (rem > 0 or (os.time() - (g.ts or 0)) < 1800)
+  -- A weekly window lives for days, so cap how long a weekly-only value may go unrefreshed.
+  local age = os.time() - (g.ts or 0)
+  local rem = (tonumber(headReset) or 0) - os.time()
+  local fresh = pct ~= nil and ((rem > 0 and (not weeklyOnly or age < 6 * 3600)) or age < 1800)
 
   if fresh then clearNotify("stale")
   else
@@ -124,21 +133,28 @@ local function draw()
 
   bar:setIcon(ICON)
   local cd = ""
-  if fresh and g.reset5_epoch then
-    local rem = tonumber(g.reset5_epoch) - os.time()
+  if fresh and headReset then
+    local rem = tonumber(headReset) - os.time()
     if rem > 0 then
-      local h = math.floor(rem / 3600)
+      local d = math.floor(rem / 86400)
+      local h = math.floor((rem % 86400) / 3600)
       local m = math.floor((rem % 3600) / 60)
-      cd = " · " .. (h > 0 and (h .. "h" .. string.format("%02d", m) .. "m") or (m .. "m"))
+      if d > 0 then cd = " · " .. d .. "d" .. string.format("%02d", h) .. "h"
+      elseif h > 0 then cd = " · " .. h .. "h" .. string.format("%02d", m) .. "m"
+      else cd = " · " .. m .. "m" end
     end
   end
   bar:setTitle(fresh and (" " .. round(pct) .. "%" .. cd) or " …")
 
   local menu = {}
   if fresh then
-    menu[#menu+1] = { title = "5-hour window" }
-    menu[#menu+1] = { title = "    " .. round(pct) .. "% used" }
-    if g.reset5_str then menu[#menu+1] = { title = "    resets " .. g.reset5_str } end
+    if not weeklyOnly then
+      menu[#menu+1] = { title = "5-hour window" }
+      menu[#menu+1] = { title = "    " .. round(pct) .. "% used" }
+      if g.reset5_str then menu[#menu+1] = { title = "    resets " .. g.reset5_str } end
+    else
+      menu[#menu+1] = { title = "No 5-hour window on this plan" }
+    end
     if g.pct7 ~= nil then
       menu[#menu+1] = { title = "-" }
       menu[#menu+1] = { title = "Weekly limit" }
