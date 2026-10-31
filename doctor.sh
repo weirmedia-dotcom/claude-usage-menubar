@@ -59,17 +59,18 @@ if [ "$AUTH_ERR" = "True" ]; then
 else
   LG=$(python3 -c "import json;print(json.load(open('$DIR/poll-state.json')).get('last_good') is not None)" 2>/dev/null)
   if [ "$LG" = "True" ]; then
-    read -r P AGE <<<"$(python3 -c "
+    read -r P AGE WIN <<<"$(python3 -c "
 import json, time
 d = json.load(open('$DIR/poll-state.json'))['last_good']
-print(d.get('pct5'), int(time.time() - d.get('ts', 0)))
+w, p = ('5-hour window', d['pct5']) if d.get('pct5') is not None else ('weekly limit', d.get('pct7'))
+print(p, int(time.time() - d.get('ts', 0)), w)
 " 2>/dev/null)"
     if [ -n "$AGE" ] && [ "$AGE" -gt 600 ]; then
       fail "cached usage is stale (last real fetch was ${AGE}s ago, ${P}% used)"
       note "A forced fetch just ran above and didn't refresh it — check for network issues"
       note "or run: claude auth login"
     else
-      pass "real usage fetched (5-hour window: ${P}% used, ${AGE}s old)"
+      pass "real usage fetched (${WIN}: ${P}% used, ${AGE}s old)"
     fi
   else
     fail "no percentage fetched yet"

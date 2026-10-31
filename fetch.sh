@@ -191,7 +191,9 @@ if isinstance(d, dict) and "error" not in d:
         g["pct5"]=pct(five); g["reset5_str"]=loc(five.get("resets_at")); g["reset5_epoch"]=ep(five.get("resets_at"))
     if week is not None:
         g["pct7"]=pct(week); g["reset7_str"]=loc(week.get("resets_at")); g["reset7_epoch"]=ep(week.get("resets_at"))
-    if g.get("pct5") is not None:
+    # Ultra (ex Max 20x, Oct 2026) has no 5-hour window: the endpoint returns
+    # five_hour: null and no `session` limit, so a weekly-only reading is a success too.
+    if g.get("pct5") is not None or g.get("pct7") is not None:
         st["last_good"]=g; st["next_ok"]=now + 60; st["fails"]=0    # success: poll every ~1 min
         st["auth_error"] = False
         json.dump(st, open(STATE,"w")); sys.exit(0)

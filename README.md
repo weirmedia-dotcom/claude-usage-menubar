@@ -9,6 +9,9 @@ your current 5-hour window %, and a live countdown to reset:
 
 Click it for a dropdown with the 5-hour and weekly limits and their reset times.
 
+On plans with **no 5-hour window** (Ultra, the Oct 2026 rename of Max 20x), the
+headline is your **weekly** % with a days countdown instead, e.g. `✳ 36% · 4d05h`.
+
 It reads the **same numbers Claude's own `/usage` panel shows** (Anthropic's OAuth
 usage endpoint) — no scraping, no guessing. It polls politely (about every 10
 minutes, with rate-limit backoff) so it never gets throttled.
