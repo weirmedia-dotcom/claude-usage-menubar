@@ -2,8 +2,8 @@
 # Rolling 7-day token usage + API-equivalent cost, by model.
 # Scans Claude Code transcripts (~/.claude/projects/**/*.jsonl) for assistant
 # messages with usage data, dedupes by message id + request id, and prices the
-# tokens at current Claude API rates (incl. cache write 1.25x/2x and cache
-# read 0.1x multipliers). Subscription usage isn't billed per token — this is
+# tokens at current Claude API rates (per-model cache write and cache read
+# prices, see PRICING). Subscription usage isn't billed per token — this is
 # "what the last 7 days would have cost through the API".
 #
 # Incremental: per-file extraction results are cached (keyed on mtime+size) in
@@ -51,24 +51,42 @@ def usd_cad():
 
 FX = usd_cad()
 
-# ---- pricing: (input, output) USD per MTok; matched by first substring hit.
-# Cache multipliers per Anthropic pricing: write 5m TTL = 1.25x input,
-# write 1h TTL = 2x input, cache read = 0.1x input.
+# ---- pricing: USD per MTok as (input, 5m cache write, 1h cache write, cache read,
+# output), straight from platform.claude.com/docs/en/about-claude/pricing
+# (checked 2026-10-31). Cache reads are NOT a flat 0.1x any more: Fable/Mythos 5.1
+# are 0.025x, Opus 5.5 and Sonnet 5.5 are 0.05x. Matched by first substring hit,
+# so the more specific ids must come first ("opus-5-5" before "opus-5").
 PRICING = [
-    ("fable",    (10.0, 50.0)),
-    ("mythos",   (10.0, 50.0)),
-    ("opus",     (5.0, 25.0)),
-    ("sonnet-5", (2.0, 10.0)),   # intro pricing through 2026-08-31; then 3/15
-    ("sonnet",   (3.0, 15.0)),
-    ("haiku",    (1.0, 5.0)),
+    ("fable-5-1",  (10.0, 12.5,  20.0, 0.25, 50.0)),
+    ("mythos-5-1", (10.0, 12.5,  20.0, 0.25, 50.0)),
+    ("fable",      (10.0, 12.5,  20.0, 1.0,  50.0)),
+    ("mythos",     (10.0, 12.5,  20.0, 1.0,  50.0)),
+    ("opus-5-5",   (4.0,  5.0,   8.0,  0.20, 20.0)),
+    ("opus",       (5.0,  6.25,  10.0, 0.50, 25.0)),   # Opus 5 / 4.8 / 4.7 / 4.6
+    ("sonnet-5-5", (2.0,  2.5,   4.0,  0.10, 10.0)),
+    ("sonnet-5",   (2.0,  2.5,   4.0,  0.20, 10.0)),
+    ("sonnet",     (3.0,  3.75,  6.0,  0.30, 15.0)),   # Sonnet 4.6 and older
+    ("haiku-5-5",  (0.10, 0.125, 0.20, 0.01, 0.50)),
+    ("haiku",      (1.0,  1.25,  2.0,  0.10, 5.0)),    # Haiku 4.5
 ]
+# Haiku 5.5 is priced per request by prompt length (input + cache writes + reads):
+# over 100k tokens the whole request pays the higher rates.
+HAIKU55_LONG = (0.50, 0.625, 1.0, 0.05, 2.50)
 
-def rates(model):
+def rates(model, prompt_tokens=0):
     m = model.lower()
     for key, r in PRICING:
         if key in m:
+            if key == "haiku-5-5" and prompt_tokens > 100_000:
+                return HAIKU55_LONG
             return r
     return None
+
+def entry_cost(model, tin, tout, cw5, cw1, cr):
+    r = rates(model, tin + cw5 + cw1 + cr)
+    if not r: return None
+    pin, pw5, pw1, pcr, pout = r
+    return (tin * pin + cw5 * pw5 + cw1 * pw1 + cr * pcr + tout * pout) / 1e6
 
 def label(model):
     m = model.lower()
@@ -165,20 +183,20 @@ def aggregate(label_text, cutoff):
                 continue
             seen.add(h)
             slots.add((path, int(ts) // BUCKET))
-            a = agg.setdefault(label(model), {"model": model, "in": 0, "out": 0,
-                                              "cw5": 0, "cw1": 0, "cr": 0})
+            # price each request on its own model id: a label groups several
+            # versions (Sonnet 5.5 + Sonnet 5, Haiku 5.5 + Haiku 4.5) at different rates
+            a = agg.setdefault(label(model), {"in": 0, "out": 0, "cw5": 0, "cw1": 0, "cr": 0,
+                                              "usd": 0.0, "priced": False})
             a["in"] += tin; a["out"] += tout
             a["cw5"] += cw5; a["cw1"] += cw1; a["cr"] += cr
+            c = entry_cost(model, tin, tout, cw5, cw1, cr)
+            if c is not None:
+                a["usd"] += c; a["priced"] = True
 
     models, total = [], 0.0
     for name, a in agg.items():
-        r = rates(a["model"])
-        cost = None
-        if r:
-            rin, rout = r
-            cost = (a["in"] * rin + a["out"] * rout
-                    + a["cw5"] * rin * 1.25 + a["cw1"] * rin * 2.0
-                    + a["cr"] * rin * 0.1) / 1e6
+        cost = a["usd"] if a["priced"] else None
+        if cost is not None:
             total += cost
         models.append({
             "label": name,
