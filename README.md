@@ -12,6 +12,17 @@ Click it for a dropdown with the 5-hour and weekly limits and their reset times.
 On plans with **no 5-hour window** (Ultra, the Oct 2026 rename of Max 20x), the
 headline is your **weekly** % with a days countdown instead, e.g. `✳ 36% · 4d05h`.
 
+### API credits (optional)
+
+The dropdown can also show the Console's monthly API credits (the grant that comes
+with Max/Ultra): remaining, expiry, spend pace and your paid balance. There is no
+public API for this, so `credits.sh` reads the Console's own billing call using your
+Console browser session cookie (`sessionKey` on platform.claude.com), kept in the
+login keychain as `claude-usage-menubar` / `console_session_key`, and your Console org
+UUID in `~/.config/claude-usage-menubar/console-org`. The cookie is a full Console
+login, so keep it in the keychain only. It expires every few weeks; the dropdown says
+so and you re-copy it. Without both, the section stays hidden.
+
 It reads the **same numbers Claude's own `/usage` panel shows** (Anthropic's OAuth
 usage endpoint) — no scraping, no guessing. It polls politely (about every 10
 minutes, with rate-limit backoff) so it never gets throttled.

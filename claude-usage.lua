@@ -13,6 +13,8 @@ local STATE = CACHE .. "/poll-state.json"
 local FETCH = CACHE .. "/fetch.sh"
 local COST_STATE = CACHE .. "/cost-state.json"
 local COST_SCAN = CACHE .. "/cost-scan.sh"
+local CREDITS_STATE = CACHE .. "/credits-state.json"
+local CREDITS = CACHE .. "/credits.sh"
 
 pcall(require, "hs.ipc")  -- enable the `hs` command-line tool (for headless diagnostics)
 hs.menuIcon(false)        -- hide Hammerspoon's own hammer icon (delete this line to keep it)
@@ -174,6 +176,26 @@ local function draw()
     end
   end
 
+  -- Console API credits (monthly plan grant + purchased balance), from credits.sh
+  local ok, cr = pcall(function() return hs.json.read(CREDITS_STATE) end)
+  if ok and type(cr) == "table" and (cr.error or cr.ts) then
+    menu[#menu+1] = { title = "-" }
+    for _, p in ipairs(type(cr.promo) == "table" and cr.promo or {}) do
+      local days = p.expires_epoch and math.floor((p.expires_epoch - os.time()) / 86400)
+      menu[#menu+1] = { title = string.format("API credits  $%.2f of $%.0f%s", p.remaining or 0, p.granted or 0,
+        p.expires_str and (" · expires " .. p.expires_str .. (days and days >= 0 and (" (" .. days .. "d)") or "")) or "") }
+      if p.per_day then
+        menu[#menu+1] = { title = string.format("    pace $%.2f/day → ~$%.0f unused at expiry", p.per_day, p.unused_at_expiry or 0) }
+      end
+    end
+    if cr.paid then menu[#menu+1] = { title = string.format("    paid balance $%.2f", cr.paid) } end
+    if cr.error == "auth" or cr.error == "no_cookie" then
+      menu[#menu+1] = { title = "    ⚠︎ Console login expired: re-copy cookie (wmpe-secrets CLAUDE_CONSOLE_SESSION_KEY)" }
+    elseif cr.error then
+      menu[#menu+1] = { title = "    ⚠︎ credits not refreshed (" .. tostring(cr.error) .. ")" }
+    end
+  end
+
   -- rolling token usage priced at API rates + senior-dev labor equivalent
   -- (from cost-scan.sh; 7-day and 30-day windows)
   local cost = readCost()
@@ -268,9 +290,15 @@ local function costScan()
   hs.task.new("/bin/bash", function() draw() end, { COST_SCAN }):start()
 end
 
+local function creditsFetch()
+  hs.task.new("/bin/bash", function() draw() end, { CREDITS }):start()
+end
+
 draw()
 refresh()
 costScan()
+creditsFetch()
+M.creditsTimer = hs.timer.doEvery(900, creditsFetch)  -- Console credit balance every 15 min
 M.timer = hs.timer.doEvery(60, refresh)  -- redraw + tick countdown, and opportunistically fetch
 M.costTimer = hs.timer.doEvery(900, costScan)  -- 7-day cost rescan every 15 min (incremental)
 _G.CLAUDE_USAGE_LOADED = true             -- marker the doctor script checks

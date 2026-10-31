@@ -32,6 +32,8 @@ cp "$SRC/fetch.sh" "$HOME/.cache/claude-usage-menubar/fetch.sh"
 chmod +x "$HOME/.cache/claude-usage-menubar/fetch.sh"
 cp "$SRC/cost-scan.sh" "$HOME/.cache/claude-usage-menubar/cost-scan.sh"
 chmod +x "$HOME/.cache/claude-usage-menubar/cost-scan.sh"
+cp "$SRC/credits.sh" "$HOME/.cache/claude-usage-menubar/credits.sh"
+chmod +x "$HOME/.cache/claude-usage-menubar/credits.sh"
 
 # --- 3. Hammerspoon module ---
 say "Installing the Hammerspoon module…"
