@@ -52,6 +52,34 @@ local function claudeIcon()
 end
 local ICON = claudeIcon()
 
+-- ring gauge filled to the headline %; a template (follows the menu bar's light/dark)
+-- until 75%, then amber, red from 90%
+local ringCache = {}
+local function ringIcon(pct)
+  pct = math.max(0, math.min(100, math.floor(tonumber(pct) or 0)))
+  if ringCache[pct] then return ringCache[pct] end
+  local sz, w = 36, 5.5
+  local col = pct >= 90 and { red = 0.94, green = 0.36, blue = 0.32, alpha = 1 }
+           or pct >= 75 and { red = 0.91, green = 0.64, blue = 0.24, alpha = 1 }
+           or { white = 0, alpha = 1 }
+  local c = hs.canvas.new({ x = 0, y = 0, w = sz, h = sz })
+  local els = {
+    { type = "circle", center = { x = sz / 2, y = sz / 2 }, radius = sz / 2 - w, action = "stroke",
+      strokeWidth = w, strokeColor = pct >= 75 and { white = 0.5, alpha = 0.45 } or { white = 0, alpha = 0.3 } },
+  }
+  if pct > 0 then
+    els[#els + 1] = { type = "arc", center = { x = sz / 2, y = sz / 2 }, radius = sz / 2 - w,
+      startAngle = 0, endAngle = 360 * pct / 100, arcRadii = false, action = "stroke",
+      strokeWidth = w, strokeColor = col, strokeCapStyle = "round" }
+  end
+  c:replaceElements(els)
+  local img = c:imageFromCanvas():setSize({ w = 16, h = 16 })
+  if pct < 75 then img = img:template(true) end
+  c:delete()
+  ringCache[pct] = img
+  return img
+end
+
 local function readState()
   local ok, t = pcall(function() return hs.json.read(STATE) end)
   if ok and type(t) == "table" then return t end
@@ -95,7 +123,7 @@ local function draw()
     bar:setTitle(" ⚠︎ login")
     notifyOnce("auth", "Claude usage widget",
       "Claude Code is logged out, so usage % can't be fetched. Click the menu bar item → Log in to Claude Code.")
-    bar:setMenu({
+    M.menu = {
       { title = "Claude Code is logged out" },
       {
         title = M.loginPolling and "Waiting for login …" or "Log in to Claude Code …",
@@ -108,7 +136,8 @@ local function draw()
         fn = M.refreshing and function() end or M.forceRefresh,
         disabled = M.refreshing and true or false,
       },
-    })
+    }
+    if M.panelUpdate then M.panelUpdate() end
     return
   end
   clearNotify("auth")
@@ -133,7 +162,7 @@ local function draw()
       "Usage % hasn't refreshed in a while — check Hammerspoon, or run `claude auth login` if it turns out to be a login problem.")
   end
 
-  bar:setIcon(ICON)
+  bar:setIcon(fresh and ringIcon(pct) or ICON)
   local cd = ""
   if fresh and headReset then
     local rem = tonumber(headReset) - os.time()
@@ -231,7 +260,8 @@ local function draw()
     fn = M.refreshing and function() end or M.forceRefresh,
     disabled = M.refreshing and true or false,
   }
-  bar:setMenu(menu)
+  M.menu = menu   -- plain-text menu, shown on ⌥-click; a normal click opens the panel
+  if M.panelUpdate then M.panelUpdate() end
 end
 
 -- periodic tick: redraws every minute (countdown) and fires a normal, backoff-respecting
@@ -293,6 +323,98 @@ end
 local function creditsFetch()
   hs.task.new("/bin/bash", function() draw() end, { CREDITS }):start()
 end
+
+-- ---------- popover panel (panel.html in a borderless webview) ----------
+local PANEL = CACHE .. "/panel.html"
+local PANEL_W = 340
+
+local function panelData()
+  local st = readState()
+  local okc, cost = pcall(function() return hs.json.read(COST_STATE) end)
+  local okr, cr = pcall(function() return hs.json.read(CREDITS_STATE) end)
+  return hs.json.encode({
+    usage = st.last_good,
+    auth_error = st.auth_error == true,
+    credits = okr and cr or nil,
+    cost = okc and cost or nil,
+    refreshing = M.refreshing and true or false,
+    login_polling = M.loginPolling and true or false,
+  }) or "{}"
+end
+
+function M.panelHide()
+  M.panelOpen = false
+  if M.wv then M.wv:hide() end
+  if M.outsideTap then M.outsideTap:stop() end
+end
+
+function M.panelUpdate()
+  if M.panelOpen and M.wv then M.wv:evaluateJavaScript("render(" .. panelData() .. ")") end
+end
+
+local function within(p, f)
+  return f and p.x >= f.x and p.x <= f.x + f.w and p.y >= f.y and p.y <= f.y + f.h
+end
+
+local function panelMessage(body)
+  body = tostring(body or "")
+  if body == "refresh" then M.forceRefresh(); creditsFetch()
+  elseif body == "login" then M.login()
+  elseif body == "close" then M.panelHide()
+  elseif body:sub(1, 2) == "h:" and M.wv then
+    local h = tonumber(body:sub(3))
+    if h then
+      local f = M.wv:frame()
+      M.wv:frame({ x = f.x, y = f.y, w = PANEL_W, h = math.min(h + 2, 900) })
+    end
+  end
+end
+
+function M.panelShow()
+  local bf = bar:frame()
+  local scr = (hs.screen.find({ x = bf.x, y = bf.y }) or hs.screen.mainScreen()):frame()
+  local x = math.min(math.max(bf.x + bf.w / 2 - PANEL_W / 2, scr.x + 8), scr.x + scr.w - PANEL_W - 8)
+  local y = bf.y + bf.h + 4
+  if not M.wv then
+    local ucc = hs.webview.usercontent.new("cu"):setCallback(function(m) panelMessage(m.body) end)
+    M.wv = hs.webview.new({ x = x, y = y, w = PANEL_W, h = 480 }, { developerExtrasEnabled = false }, ucc)
+    M.wv:windowStyle({ "borderless" }):transparent(true):shadow(true)
+      :level(hs.drawing.windowLevels.popUpMenu)
+      :behaviorAsLabels({ "canJoinAllSpaces", "transient" })
+    local fh = io.open(PANEL, "r")
+    local html = fh and fh:read("*a") or "<p>panel.html missing; re-run install.sh</p>"
+    if fh then fh:close() end
+    local a, b = html:find("/*DATA*/null/*END*/", 1, true)
+    if a then html = html:sub(1, a - 1) .. panelData() .. html:sub(b + 1) end
+    M.wv:html(html)
+  else
+    local f = M.wv:frame()
+    M.wv:frame({ x = x, y = y, w = PANEL_W, h = f.h })
+  end
+  M.panelOpen = true
+  M.wv:show()
+  M.panelUpdate()
+  -- close on any click outside the panel (clicks on the menu bar item toggle instead)
+  M.outsideTap = M.outsideTap or hs.eventtap.new(
+    { hs.eventtap.event.types.leftMouseDown, hs.eventtap.event.types.rightMouseDown },
+    function(e)
+      local p = e:location()
+      if M.panelOpen and not within(p, M.wv:frame()) and not within(p, bar:frame()) then
+        hs.timer.doAfter(0, M.panelHide)
+      end
+      return false
+    end)
+  M.outsideTap:start()
+end
+
+M.bar = bar   -- for headless diagnostics (doctor / hs -c)
+bar:setClickCallback(function(mods)
+  if mods and mods.alt then
+    M.panelHide()
+    bar:popupMenu(hs.mouse.absolutePosition(), M.menu or {})
+  elseif M.panelOpen then M.panelHide()
+  else M.panelShow() end
+end)
 
 draw()
 refresh()
