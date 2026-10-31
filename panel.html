@@ -1,0 +1,212 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!-- Popover for the Claude usage menu-bar widget. claude-usage.lua injects the data by
+     replacing the DATA placeholder on first load, then calls render(data) on updates.
+     Buttons talk back through webkit.messageHandlers.cu. -->
+<style>
+  :root {
+    --bg: rgba(250, 249, 247, 0.97);
+    --card: rgba(0, 0, 0, 0.04);
+    --line: rgba(0, 0, 0, 0.08);
+    --text: #1f1e1d;
+    --muted: #6b6a68;
+    --track: rgba(0, 0, 0, 0.09);
+    --accent: #c96442;
+    --ok: #3d8b5f;
+    --warn: #d4902a;
+    --bad: #d6453d;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: rgba(32, 31, 30, 0.97);
+      --card: rgba(255, 255, 255, 0.05);
+      --line: rgba(255, 255, 255, 0.08);
+      --text: #f2f0ed;
+      --muted: #a09d98;
+      --track: rgba(255, 255, 255, 0.10);
+      --accent: #e07a55;
+      --ok: #5fb383;
+      --warn: #e8a33d;
+      --bad: #ef5b52;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: transparent; }
+  body {
+    font: 12px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    color: var(--text);
+    -webkit-user-select: none;
+    cursor: default;
+  }
+  #panel {
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 12px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .card { background: var(--card); border-radius: 9px; padding: 10px; }
+  .h { font-size: 11px; font-weight: 600; color: var(--muted); letter-spacing: .02em; margin-bottom: 8px;
+       display: flex; justify-content: space-between; align-items: baseline; }
+  .h b { color: var(--text); font-weight: 600; }
+  .num { font-variant-numeric: tabular-nums; }
+  .muted { color: var(--muted); }
+
+  .rings { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 6px; }
+  .ring { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 4px; }
+  .ring svg { width: 64px; height: 64px; }
+  .ring .lbl { font-weight: 600; }
+  .ring .sub { font-size: 10.5px; color: var(--muted); }
+
+  .big { font-size: 20px; font-weight: 650; letter-spacing: -.01em; }
+  .bar { position: relative; height: 8px; border-radius: 4px; background: var(--track); overflow: visible; margin: 8px 0 6px; }
+  .bar > i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; }
+  .bar > .tick { position: absolute; top: -3px; bottom: -3px; width: 2px; border-radius: 1px; background: var(--text); opacity: .55; }
+  .row { display: flex; justify-content: space-between; gap: 8px; }
+  .warnline { margin-top: 6px; color: var(--warn); font-size: 11px; }
+
+  .spark { display: flex; align-items: flex-end; gap: 2px; height: 38px; margin-top: 8px; }
+  .spark i { flex: 1; min-height: 2px; border-radius: 2px 2px 0 0; background: var(--accent); opacity: .55; }
+  .spark i.today { opacity: 1; }
+
+  .tabs { display: flex; gap: 2px; background: var(--track); border-radius: 7px; padding: 2px; }
+  .tabs button { flex: 1; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 11px;
+                 padding: 3px 0; border-radius: 5px; }
+  .tabs button.on { background: var(--bg); color: var(--text); font-weight: 600; }
+  .model { display: grid; grid-template-columns: 54px 1fr auto; align-items: center; gap: 8px; margin-top: 7px; }
+  .model .mbar { height: 6px; border-radius: 3px; background: var(--track); position: relative; }
+  .model .mbar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--accent); }
+  .model .v { text-align: right; font-size: 11px; }
+
+  .banner { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--text);
+            border-radius: 9px; padding: 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .foot { display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: 11px; }
+  .btn { border: 1px solid var(--line); background: var(--card); color: var(--text); font: inherit; font-size: 11px;
+         padding: 3px 10px; border-radius: 6px; }
+  .btn:active { opacity: .7; }
+  .btn.primary { background: var(--accent); border-color: transparent; color: #fff; }
+</style>
+</head>
+<body>
+<div id="panel"></div>
+<script>
+const send = m => { try { webkit.messageHandlers.cu.postMessage(m) } catch (e) {} };
+let tab = 1;   // cost window: 0 Today, 1 7 days, 2 30 days (remembered per viewer)
+try { const t = parseInt(localStorage.getItem("cu.tab")); if (t >= 0 && t <= 2) tab = t; } catch (e) {}
+const pickTab = i => { tab = i; try { localStorage.setItem("cu.tab", i); } catch (e) {} render(D); };
+let D = null;
+
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const money = (v, d = 2) => "$" + Number(v || 0).toFixed(d);
+const sev = p => p >= 90 ? "var(--bad)" : p >= 75 ? "var(--warn)" : "var(--accent)";
+function left(epoch) {
+  const s = epoch - Date.now() / 1000;
+  if (!epoch || s <= 0) return "";
+  const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+  return d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+function ago(ts) {
+  const s = Date.now() / 1000 - (ts || 0);
+  return s < 90 ? "just now" : s < 3600 ? `${Math.round(s / 60)}m ago` : `${Math.round(s / 3600)}h ago`;
+}
+
+function ring(label, pct, resetEpoch, resetStr) {
+  const r = 26, c = 2 * Math.PI * r, p = Math.max(0, Math.min(100, pct || 0));
+  const l = left(resetEpoch);
+  return `<div class="ring">
+    <svg viewBox="0 0 64 64">
+      <circle cx="32" cy="32" r="${r}" fill="none" stroke="var(--track)" stroke-width="6"/>
+      <circle cx="32" cy="32" r="${r}" fill="none" stroke="${sev(p)}" stroke-width="6" stroke-linecap="round"
+        stroke-dasharray="${(p / 100 * c).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 32 32)"/>
+      <text x="32" y="36.5" text-anchor="middle" font-size="14" font-weight="650" fill="var(--text)"
+        font-family="-apple-system" class="num">${Math.round(p)}%</text>
+    </svg>
+    <div class="lbl">${esc(label)}</div>
+    <div class="sub">${l ? "resets in " + l : ""}${resetStr ? "<br>" + esc(resetStr) : ""}</div>
+  </div>`;
+}
+
+function limitsCard(d) {
+  const g = d.usage || {};
+  const rings = [];
+  if (g.pct5 != null) rings.push(ring("5-hour", g.pct5, g.reset5_epoch, g.reset5_str));
+  if (g.pct7 != null) rings.push(ring("Weekly", g.pct7, g.reset7_epoch, g.reset7_str));
+  for (const s of g.scoped || []) rings.push(ring(s.label || "Model", s.pct, s.reset_epoch, s.reset_str));
+  if (!rings.length) return `<div class="card"><div class="h">Plan limits</div><div class="muted">Fetching usage …</div></div>`;
+  const note = g.pct5 == null && g.pct7 != null ? `<span>no 5-hour window</span>` : "";
+  return `<div class="card"><div class="h"><b>Plan limits</b>${note}</div><div class="rings">${rings.join("")}</div></div>`;
+}
+
+function creditsCard(d) {
+  const cr = d.credits;
+  if (!cr || (!cr.promo && !cr.error)) return "";
+  let html = "";
+  for (const p of cr.promo || []) {
+    const frac = p.granted ? p.remaining / p.granted : 0;
+    // tick = share of the grant's lifetime still ahead; fill ahead of it means credit will expire unused
+    let tick = "";
+    if (p.expires_epoch && p.granted_epoch) {
+      const life = (p.expires_epoch - Date.now() / 1000) / (p.expires_epoch - p.granted_epoch);
+      tick = `<span class="tick" style="left:calc(${(Math.max(0, Math.min(1, life)) * 100).toFixed(1)}% - 1px)"></span>`;
+    }
+    const days = p.expires_epoch ? Math.max(0, Math.floor((p.expires_epoch - Date.now() / 1000) / 86400)) : null;
+    html += `<div class="row"><span class="big num">${money(p.remaining)}</span>
+               <span class="muted num" style="align-self:flex-end">of ${money(p.granted, 0)}</span></div>
+      <div class="bar"><i style="width:${(frac * 100).toFixed(1)}%;background:var(--ok)"></i>${tick}</div>
+      <div class="row muted"><span>expires ${esc(p.expires_str || "")}${days != null ? ` · ${days}d` : ""}</span>
+        <span class="num">${p.per_day != null ? `${money(p.per_day)}/day · ~${money(p.unused_at_expiry, 0)} unused` : ""}</span></div>
+      ${tick ? `<div class="muted" style="font-size:10.5px;margin-top:2px">Marker = even-burn point. Green past it will expire unused.</div>` : ""}`;
+  }
+  const daily = cr.daily || [];
+  if (daily.length) {
+    const max = Math.max(...daily.map(x => x.usd), 0.01);
+    const total = daily.reduce((a, x) => a + x.usd, 0);
+    html += `<div class="spark">${daily.map((x, i) =>
+        `<i class="${i === daily.length - 1 ? "today" : ""}" title="${esc(x.day)} ${money(x.usd)}" style="height:${(x.usd / max * 100).toFixed(1)}%"></i>`).join("")}</div>
+      <div class="row muted" style="margin-top:4px"><span>API spend · 30 days</span><span class="num">${money(total)} · peak ${money(max)}</span></div>`;
+  }
+  if (cr.paid != null) html += `<div class="row muted" style="margin-top:6px"><span>Paid balance</span><span class="num">${money(cr.paid)}</span></div>`;
+  if (cr.error === "auth" || cr.error === "no_cookie")
+    html += `<div class="warnline">Console login expired. Re-copy the sessionKey cookie (wmpe-secrets CLAUDE_CONSOLE_SESSION_KEY).</div>`;
+  else if (cr.error) html += `<div class="warnline">Credits not refreshed (${esc(cr.error)}). Showing last known.</div>`;
+  return `<div class="card"><div class="h"><b>API credits</b><span>${cr.ts ? ago(cr.ts) : ""}</span></div>${html}</div>`;
+}
+
+function costCard(d) {
+  const ws = (d.cost && d.cost.windows) || [];
+  if (!ws.length) return "";
+  const w = ws[Math.min(tab, ws.length - 1)];
+  const models = (w.models || []).slice().sort((a, b) => (b.cad || 0) - (a.cad || 0));
+  const max = Math.max(...models.map(m => m.cad || 0), 0.01);
+  const fmtTok = n => n >= 1e9 ? (n / 1e9).toFixed(1) + "B" : n >= 1e6 ? (n / 1e6).toFixed(0) + "M" : n >= 1e3 ? (n / 1e3).toFixed(0) + "k" : n;
+  const tabs = ws.map((x, i) => `<button class="${i === tab ? "on" : ""}" onclick="pickTab(${i})">${esc(x.label.replace("Last ", ""))}</button>`).join("");
+  return `<div class="card">
+    <div class="h"><b>API value of your usage</b><span>if billed per token</span></div>
+    <div class="tabs">${tabs}</div>
+    <div class="row" style="margin-top:8px"><span class="big num">CA$${Math.round(w.total_cad ?? w.total_usd ?? 0)}</span>
+      ${w.dev_hours ? `<span class="muted num" style="align-self:flex-end">≈ ${Math.round(w.dev_hours)} dev-hours</span>` : ""}</div>
+    ${models.map(m => `<div class="model"><span>${esc(m.label)}</span>
+        <span class="mbar"><i style="width:${((m.cad || 0) / max * 100).toFixed(1)}%"></i></span>
+        <span class="v num">CA$${(m.cad || 0).toFixed(2)} <span class="muted">${fmtTok(m.total_tokens || 0)}</span></span></div>`).join("")}
+  </div>`;
+}
+
+function render(d) {
+  D = d;
+  const parts = [];
+  if (d.auth_error) parts.push(`<div class="banner"><span>Claude Code is logged out, so usage can't load.</span>
+      <button class="btn primary" onclick="send('login')">${d.login_polling ? "Waiting …" : "Log in"}</button></div>`);
+  parts.push(limitsCard(d), creditsCard(d), costCard(d));
+  parts.push(`<div class="foot"><span>${d.usage && d.usage.ts ? "Usage updated " + ago(d.usage.ts) : ""}</span>
+      <button class="btn" onclick="send('refresh')">${d.refreshing ? "Refreshing …" : "Refresh"}</button></div>`);
+  document.getElementById("panel").innerHTML = parts.join("");
+  requestAnimationFrame(() => send("h:" + Math.ceil(document.getElementById("panel").getBoundingClientRect().height)));
+}
+document.addEventListener("keydown", e => { if (e.key === "Escape") send("close"); });
+render(/*DATA*/null/*END*/ || {});
+setInterval(() => D && render(D), 30000);   // keep countdowns and "ago" labels moving
+</script>
+</body>
+</html>

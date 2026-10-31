@@ -16,7 +16,7 @@ trap 'rmdir "$LOCK" 2>/dev/null' EXIT
 
 python3 - "$DIR" <<'PY'
 import json, os, sys, time, subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 
 DIR = sys.argv[1]
 STATE = os.path.join(DIR, "credits-state.json")
@@ -79,7 +79,7 @@ for t in d.get("promo_tranches") or []:
     rem, gr = t.get("remaining_amount_minor_units"), t.get("granted_amount_minor_units")
     if not isinstance(rem, (int, float)) or not isinstance(gr, (int, float)): continue
     g_ep, x_ep = epoch(t.get("granted_at")), epoch(t.get("expires_at"))
-    p = {"remaining": rem / 100, "granted": gr / 100,
+    p = {"remaining": rem / 100, "granted": gr / 100, "granted_epoch": g_ep,
          "expires_epoch": x_ep, "expires_str": local(t.get("expires_at"))}
     # pace since the grant landed, and what that pace leaves unused at expiry
     if g_ep and x_ep and now - g_ep > 86400:
@@ -88,8 +88,29 @@ for t in d.get("promo_tranches") or []:
         p["unused_at_expiry"] = round(max(0.0, rem / 100 - rate * max(0, (x_ep - now) / 86400)), 2)
     promo.append(p)
 
+# Daily org API spend for the last 30 days (the popover's sparkline), from the
+# documented Admin API cost report. Optional: needs the Admin key in the keychain.
+daily = prev.get("daily")
+try:
+    akey = subprocess.check_output(["security","find-generic-password","-s","claude-usage-menubar",
+                                    "-a","anthropic_admin_api_key","-w"], text=True,
+                                   stderr=subprocess.DEVNULL).strip()
+    start = datetime.fromtimestamp(now - 30 * 86400, timezone.utc).strftime("%Y-%m-%dT00:00:00Z")
+    acfg = f'header = "x-api-key: {akey}"\nheader = "anthropic-version: 2023-06-01"\n'
+    r = subprocess.run(["curl","-s","--max-time","20","-K","-",
+                        f"https://api.anthropic.com/v1/organizations/cost_report?starting_at={start}&bucket_width=1d&limit=31"],
+                       input=acfg, capture_output=True, text=True, timeout=25).stdout
+    cr = json.loads(r)
+    if isinstance(cr.get("data"), list):
+        # cost report amounts are in cents
+        daily = [{"day": b["starting_at"][:10],
+                  "usd": round(sum(float(x.get("amount") or 0) for x in b.get("results", [])) / 100, 2)}
+                 for b in cr["data"]]
+except Exception:
+    pass
+
 paid = d.get("amount_without_scoped_credits")
 save({"ts": now, "promo": promo,
       "paid": paid / 100 if isinstance(paid, (int, float)) else None,
-      "error": None})
+      "daily": daily, "error": None})
 PY
