@@ -52,33 +52,53 @@ local function claudeIcon()
 end
 local ICON = claudeIcon()
 
--- ring gauge filled to the headline %; a template (follows the menu bar's light/dark)
--- until 75%, then amber, red from 90%
-local ringCache = {}
-local function ringIcon(pct)
+-- The Claude spark as a gauge: its 12 rays fill clockwise from 12 o'clock with the
+-- headline % (each ray ~8.3%, the current ray fills partway along its length), unused
+-- rays stay faint, and the ray at the even-pace point reaches further out. A template
+-- (follows the menu bar's light/dark) until 75%, then amber, red from 90%.
+local sparkCache = {}
+local function sparkIcon(pct, evenPct)
   pct = math.max(0, math.min(100, math.floor(tonumber(pct) or 0)))
-  if ringCache[pct] then return ringCache[pct] end
-  local sz, w = 36, 5.5
-  local col = pct >= 90 and { red = 0.94, green = 0.36, blue = 0.32, alpha = 1 }
-           or pct >= 75 and { red = 0.91, green = 0.64, blue = 0.24, alpha = 1 }
+  local rays = 12
+  local paceRay = evenPct and math.min(rays - 1, math.floor(math.max(0, evenPct) / 100 * rays)) or -1
+  local key = pct .. ":" .. paceRay
+  if sparkCache[key] then return sparkCache[key] end
+  local sz = 36
+  local cx, cy = sz / 2, sz / 2
+  local inner, outer, paceOuter = sz * 0.06, sz * 0.40, sz * 0.5
+  local warm = pct >= 75
+  local lit = pct >= 90 and { red = 0.94, green = 0.36, blue = 0.32, alpha = 1 }
+           or warm and { red = 0.91, green = 0.64, blue = 0.24, alpha = 1 }
            or { white = 0, alpha = 1 }
-  local c = hs.canvas.new({ x = 0, y = 0, w = sz, h = sz })
-  local els = {
-    { type = "circle", center = { x = sz / 2, y = sz / 2 }, radius = sz / 2 - w, action = "stroke",
-      strokeWidth = w, strokeColor = pct >= 75 and { white = 0.5, alpha = 0.45 } or { white = 0, alpha = 0.3 } },
-  }
-  if pct > 0 then
-    els[#els + 1] = { type = "arc", center = { x = sz / 2, y = sz / 2 }, radius = sz / 2 - w,
-      startAngle = 0, endAngle = 360 * pct / 100, arcRadii = false, action = "stroke",
-      strokeWidth = w, strokeColor = col, strokeCapStyle = "round" }
+  local faint = warm and { white = 0.5, alpha = 0.5 } or { white = 0, alpha = 0.28 }
+  local filled = pct / 100 * rays
+  local els = {}
+  local function ray(a, r0, r1, color)
+    els[#els + 1] = {
+      type = "segments", action = "stroke", strokeColor = color,
+      strokeWidth = sz * 0.085, strokeCapStyle = "round",
+      coordinates = {
+        { x = cx + r0 * math.cos(a), y = cy + r0 * math.sin(a) },
+        { x = cx + r1 * math.cos(a), y = cy + r1 * math.sin(a) },
+      },
+    }
   end
+  for i = 0, rays - 1 do
+    local a = (i / rays) * 2 * math.pi - math.pi / 2
+    local len = (i == paceRay) and paceOuter or outer
+    ray(a, inner, len, faint)
+    local f = math.max(0, math.min(1, filled - i))
+    if f > 0 then ray(a, inner, inner + (len - inner) * f, lit) end
+  end
+  local c = hs.canvas.new({ x = 0, y = 0, w = sz, h = sz })
   c:replaceElements(els)
   local img = c:imageFromCanvas():setSize({ w = 16, h = 16 })
-  if pct < 75 then img = img:template(true) end
+  if not warm then img = img:template(true) end
   c:delete()
-  ringCache[pct] = img
+  sparkCache[key] = img
   return img
 end
+M.sparkIcon = sparkIcon   -- for headless icon previews
 
 local function readState()
   local ok, t = pcall(function() return hs.json.read(STATE) end)
@@ -162,7 +182,14 @@ local function draw()
       "Usage % hasn't refreshed in a while — check Hammerspoon, or run `claude auth login` if it turns out to be a login problem.")
   end
 
-  bar:setIcon(fresh and ringIcon(pct) or ICON)
+  -- even-pace point: how far through the headline window we are
+  local evenPct
+  if fresh and headReset then
+    local win = weeklyOnly and 7 * 86400 or 5 * 3600
+    local r = tonumber(headReset) - os.time()
+    if r > 0 and r <= win then evenPct = (1 - r / win) * 100 end
+  end
+  bar:setIcon(fresh and sparkIcon(pct, evenPct) or ICON)
   local cd = ""
   if fresh and headReset then
     local rem = tonumber(headReset) - os.time()

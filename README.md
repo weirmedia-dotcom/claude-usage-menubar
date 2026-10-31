@@ -9,8 +9,9 @@ your current 5-hour window %, and a live countdown to reset:
 
 Click it for a panel with ring gauges for every limit (5-hour, weekly, per-model),
 the API credit balance with a 30-day spend chart, and the API value of your usage by
-model. **⌥-click** shows the plain text menu instead. The menu bar icon is a ring that
-fills with your headline %, turning amber at 75% and red at 90%.
+model. **⌥-click** shows the plain text menu instead. The menu bar icon is the Claude spark as a
+gauge: its 12 rays fill clockwise with your headline %, the longer ray marks the
+even-pace point, and it turns amber at 75% and red at 90%.
 
 On plans with **no 5-hour window** (Ultra, the Oct 2026 rename of Max 20x), the
 headline is your **weekly** % with a days countdown instead, e.g. `✳ 36% · 4d05h`.
